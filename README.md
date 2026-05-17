@@ -4,7 +4,7 @@ A self-contained script to sync your Audible library, select a book, and convert
 
 ## Prerequisites
 
-1. **FFmpeg**: Required for audio conversion.
+1. **FFmpeg**: Required for audio conversion and splitting.
    ```bash
    brew install ffmpeg
    ```
@@ -42,12 +42,16 @@ Search your **entire library** by title, author, narrator, or genre:
 - **Smart Views**:
     - **Default**: Shows newest 20 books for quick access.
     - **Search**: Grep your entire library using one or more keywords.
+- **Flexible Output Formats**:
+    - **Single MP3**: One large file for the whole book.
+    - **Chapter Split**: Automatically splits into multiple MP3s based on chapters, preserving metadata and titles.
+    - **Timed Segments**: Splits the book into 20-minute parts for easier navigation on some players.
 - **Interactive Selection**: Pick a book from the displayed table by its number.
 - **Playback Speed Options**: Choose between `1.0x`, `1.2x`, `1.5x`, `1.8x`, or `2.0x` speeds.
 - **Smart Caching**:
     - Downloaded source files (`.aax`/`.aaxc`) are saved in the system's temporary directory.
     - The script detects existing downloads and asks if you want to reuse them to save time and bandwidth.
-- **Overwrite Protection**: Prompts before overwriting existing MP3 files on your Desktop.
+- **Overwrite Protection**: Prompts before overwriting existing MP3 files or directories on your Desktop.
 - **Automatic Speed Tagging**: Resulting filenames include the chosen speed (e.g., `BookTitle_1.5x.mp3`).
 - **Direct to Desktop**: All converted MP3s are saved directly to your Desktop.
 - **Universal Decryption**: Automatically handles both standard AAX and modern AAXC encryption keys.

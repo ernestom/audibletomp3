@@ -196,7 +196,7 @@ def get_activation_bytes():
 
 def convert(input_file, decrypt_info, speed, output_file):
     """Perform the conversion with speed adjustment"""
-    cmd = ["ffmpeg", "-y"]
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
     if decrypt_info['type'] == "aaxc":
         cmd.extend(["-audible_key", decrypt_info['key'], "-audible_iv", decrypt_info['iv']])
     else:
@@ -217,15 +217,81 @@ def convert(input_file, decrypt_info, speed, output_file):
         str(output_file)
     ])
     
-    info(f"Converting at {speed}x speed to: {output_file.name}")
+    info(f"Converting at {speed}x speed...")
     result = run_command(cmd, stream=True)
     
     if result.returncode == 0 and output_file.exists() and output_file.stat().st_size > 0:
-        success(f"\nSuccess! MP3 created on Desktop: {output_file.name}")
         return True
     else:
         error("Conversion failed.")
         return False
+
+def get_chapters(input_file):
+    """Extract chapter information from an MP3 file"""
+    cmd = ["ffprobe", "-v", "error", "-show_chapters", "-print_format", "json", str(input_file)]
+    result = run_command(cmd)
+    if result and result.returncode == 0:
+        try:
+            return json.loads(result.stdout).get("chapters", [])
+        except:
+            return []
+    return []
+
+def split_audio(input_file, output_dir, mode="chapters"):
+    """Split the MP3 file into multiple parts"""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    if mode == "chapters":
+        chapters = get_chapters(input_file)
+        if not chapters:
+            info("No chapters found. Falling back to 20-minute segments.")
+            mode = "20m"
+        else:
+            info(f"Splitting into {len(chapters)} chapters...")
+            for i, chapter in enumerate(chapters):
+                start = chapter.get('start_time', 0)
+                end = chapter.get('end_time', 0)
+                num = i + 1
+                
+                # Get chapter title or default
+                title = chapter.get('tags', {}).get('title', f"Chapter {num}")
+                clean_chap_title = "".join(c for c in title if c.isalnum() or c in (' ', '_')).strip()
+                output_path = output_dir / f"{num:03d} - {clean_chap_title}.mp3"
+                
+                split_cmd = [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-ss", str(start),
+                    "-to", str(end),
+                    "-i", str(input_file),
+                    "-c", "copy",
+                    "-map_metadata", "0",
+                    "-metadata", f"title={title}",
+                    "-metadata", f"track={num}",
+                    str(output_path)
+                ]
+                run_command(split_cmd)
+            return True
+
+    if mode == "20m":
+        segment_time = 1200 # 20 minutes
+        info("Splitting into 20-minute segments...")
+        
+        output_pattern = str(output_dir / "Part %03d.mp3")
+        split_cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(input_file),
+            "-f", "segment",
+            "-segment_time", str(segment_time),
+            "-segment_start_number", "1",
+            "-c", "copy",
+            "-map_metadata", "0",
+            "-reset_timestamps", "1",
+            output_pattern
+        ]
+        result = run_command(split_cmd)
+        return result.returncode == 0
+
+    return False
 
 def main():
     check_dependencies()
@@ -291,20 +357,55 @@ def main():
         except ValueError:
             print("Please enter a number.")
 
+    # Split selection
+    print("\nSelect output format:")
+    print("1) Single MP3 file")
+    print("2) Multiple MP3s (one per chapter)")
+    print("3) Multiple MP3s (20-minute parts)")
+    
+    split_mode = "none"
+    while True:
+        try:
+            m_choice = input(f"Choice (1-3): ")
+            if m_choice == "1":
+                split_mode = "none"
+                break
+            elif m_choice == "2":
+                split_mode = "chapters"
+                break
+            elif m_choice == "3":
+                split_mode = "20m"
+                break
+            else:
+                print("Invalid choice.")
+        except ValueError:
+            print("Please enter a number.")
+
     asin = selected_book['asin']
     title = selected_book['title']
     
     # Prepare output path
     clean_title = "".join(c for c in title if c.isalnum() or c in (' ', '_')).rstrip()
-    output_file = DESKTOP_DIR / f"{clean_title}_{selected_speed}x.mp3"
     
-    # Check if MP3 already exists
-    if output_file.exists():
-        info(f"Output file already exists: {output_file.name}")
-        overwrite = input("Overwrite existing MP3? (y/N): ").lower()
-        if overwrite != 'y':
-            info("Skipping conversion.")
-            sys.exit(0)
+    if split_mode == "none":
+        output_path = DESKTOP_DIR / f"{clean_title}_{selected_speed}x.mp3"
+        if output_path.exists():
+            info(f"Output file already exists: {output_path.name}")
+            overwrite = input("Overwrite existing MP3? (y/N): ").lower()
+            if overwrite != 'y':
+                info("Skipping conversion.")
+                sys.exit(0)
+    else:
+        output_dir = DESKTOP_DIR / f"{clean_title}_{selected_speed}x"
+        if output_dir.exists():
+            info(f"Output directory already exists: {output_dir.name}")
+            overwrite = input("Overwrite existing directory? (y/N): ").lower()
+            if overwrite != 'y':
+                info("Skipping conversion.")
+                sys.exit(0)
+            shutil.rmtree(output_dir)
+        # Use a temporary file for the full conversion
+        output_path = CACHE_DIR / f"{asin}_{selected_speed}x_full.mp3"
 
     # Check for existing download
     aax_file, voucher_file = find_cached_files(asin)
@@ -336,7 +437,17 @@ def main():
         sys.exit(1)
             
     # Convert
-    convert(aax_file, decrypt_info, selected_speed, output_file)
+    if convert(aax_file, decrypt_info, selected_speed, output_path):
+        if split_mode != "none":
+            if split_audio(output_path, output_dir, mode=split_mode):
+                success(f"\nSuccess! MP3 parts created in: {output_dir.name}")
+                # Cleanup full conversion file
+                if output_path.exists():
+                    output_path.unlink()
+            else:
+                error("Splitting failed.")
+        else:
+            success(f"\nSuccess! MP3 created on Desktop: {output_path.name}")
 
 if __name__ == "__main__":
     try:
