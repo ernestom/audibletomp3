@@ -1,0 +1,11 @@
+# Visit https://soloterm.com to learn more
+name: Audible to MP3
+icon: null
+processes:
+  Run:
+    command: python audibletomp3.py
+    working_dir: null
+    auto_start: false
+    auto_restart: false
+    restart_when_changed: []
+    env: {}
